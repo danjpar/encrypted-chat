@@ -1,0 +1,209 @@
+<!doctype html>
+<html>
+<head>
+<title>Socket.IO Encrypted Chat</title>
+<style>
+html {width:100%;height:100%;}
+body {width:99%;height:98%;margin:0;padding:0.5% 0.5% 0.25%;position:relative;}
+#public-key {width:100%;white-space:nowrap;overflow:hidden;font-size:10px;line-height:1;}
+#encrypted-chat {height:71.5%;position:relative;}
+#block-text {float:left;height:100%;width:73%;font-size:11px;word-wrap:break-word;overflow-y:scroll;}
+#user-list {float:left;width:27%;height:100%;}
+#to-key {width:98%;}
+#message {width:84%;}
+#button {width:14%;cursor:pointer;}
+#sendMsg {text-align:center;}
+#my-user {color:blue;}
+#user-list {font-size:11px;overflow:hidden;}
+.can-hide {visibility:visible;}
+</style>
+</head>
+	<body>
+		<div id="public-key"></div>
+
+		<div id="encrypted-chat">
+			<div id="block-text"></div>
+			<div id="user-list">
+			<div id="my-user"></div>
+			</div>
+		</div>	
+		<form id="sendMsg">
+			<input id="to-key" type="text" placeholder="Address"></input>
+			<input id="message" type="text" placeholder="Message"></input><input id="button" type="submit" value="Send" />
+		</form>
+	</div>
+<!-- https://github.com/wwwtyro/cryptico -->
+	<script src="cryptico/jsbn.js"></script>
+	<script src="cryptico/random.js"></script>
+	<script src="cryptico/hash.js"></script>
+	<script src="cryptico/rsa.js"></script>
+	<script src="cryptico/aes.js"></script>
+	<script src="cryptico/api.js"></script>
+	<script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/2.0.4/socket.io.js"></script>
+    <script>
+	
+    var bText = document.getElementById('block-text');	
+
+ 	var myPublicKey = document.getElementById('public-key');
+	var myUserId = document.getElementById('my-user');
+	var userList = document.getElementById('user-list');
+	var toForm = document.getElementById('sendMsg');
+	var toKey = document.getElementById('to-key');
+    var message = document.getElementById('message');
+		
+    var socket = io();
+
+	var rsaKey = '';
+	var publicKey = ''; 
+	var charset = " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\]^_`abcdefghijklmnopqrstuvwxyz{|}~";	
+	
+	// this method is not recommended
+	var generateRandom = function(e) {
+		var randomN = '';
+		for (i = 0; i < e; i++){
+			randomN += charset[Math.floor(Math.random() * (charset.length))];	
+		}
+		return randomN;
+	}
+	
+	var getKeyPair = function() {
+		rsaKey = cryptico.generateRSAKey(generateRandom(64), 1024);
+		publicKey = cryptico.publicKeyString(rsaKey); 
+		myPublicKey.innerHTML = '<div>My Public Key:</div><div>' + publicKey.toString() + '</div>';
+		socket.emit('key', publicKey);
+	};
+	getKeyPair();
+	
+	toForm.onsubmit = function(e){
+        e.preventDefault();
+		while (toKey.value != '' && message.value != '') {
+			var toPublicKey = toKey.value;
+			var encryptText = message.value;
+			var EncryptionResult = cryptico.encrypt(encryptText, toPublicKey, rsaKey);
+			if (EncryptionResult.status != 'success'){
+				return ;
+			} else {
+				socket.emit('sendCipher', {'cipher': EncryptionResult.cipher,
+				'sentFrom':publicKey,'sendTo':toPublicKey});
+				message.value = toKey.value = '';
+			}
+		}
+    }
+
+	var toggleHide = function(e) {
+		var x = document.getElementsByClassName("can-hide-"+e);
+		for (i=0; i<x.length; i++) {
+			if (x[i].style.display === "none") {
+				x[i].style.display = "block";
+			} else {
+			x[i].style.display = "none";
+			}
+		}
+	};
+
+	var messageCount = 0;
+	socket.on('addCipher', function(data){
+		messageCount++;
+
+		var newMessage = document.createElement('div')
+		newMessage.id = 'encrypted-message-'+messageCount;
+
+		var messageSocket = document.createElement('div')
+		messageSocket.id = 'from-'+messageCount;
+		messageSocket.style.color = 'red';
+		messageSocket.style.display = 'table';
+		messageSocket.style.cursor = 'pointer';
+		messageSocket.setAttribute('onclick', 'toggleHide('+messageCount+');');
+		messageSocket.appendChild(document.createTextNode(data.socket));
+		
+		var messageFrom = document.createElement('div')
+		messageFrom.className = 'can-hide-'+messageCount;
+		messageFrom.style.display = 'none';
+		messageFrom.style.color = 'orange';
+		messageFrom.appendChild(document.createTextNode(data.sentFrom));
+
+		var messageTo = document.createElement('div')
+		messageTo.className = 'can-hide-'+messageCount;
+		messageTo.style.display = 'none';
+		messageTo.style.color = 'green';
+		messageTo.appendChild(document.createTextNode(data.sendTo));
+		
+		var messageCipher = document.createElement('div')
+		messageCipher.className = 'can-hide-'+messageCount;
+		messageCipher.style.display = 'none';
+		messageCipher.appendChild(document.createTextNode(data.cipher));
+
+		newMessage.appendChild(messageSocket);
+		newMessage.appendChild(messageFrom);
+		newMessage.appendChild(messageTo);
+		newMessage.appendChild(messageCipher);
+
+		bText.appendChild(newMessage);
+
+/*
+		bText.innerHTML += '<div id="encrypted-message-'+messageCount+'">'
+						+ '<div style="cursor:pointer;color:red;display:table;" id="from-'+messageCount+'" onclick="toggleHide('+messageCount+')">' 
+						+ data.socket.toString() + '</div>'
+						+ '<div style="display:none;color:orange;" class="can-hide-'+messageCount+'">' 
+						+ data.sentFrom.toString() + '</div>'
+						+ '<div style="display:none;color:green;" class="can-hide-'+messageCount+'">' 
+						+ data.sendTo.toString() + '</div>'
+						+ '<div style="display:none;" class="can-hide-'+messageCount+'">' 
+						+ data.cipher.toString() + '</div></div>';
+
+		bText.innerHTML += '<div id="encrypted-message-'+messageCount+'">'
+						+ '<div style="cursor:pointer;color:red;display:table;" id="from-'+messageCount+'" onclick="toggleHide('+messageCount+')">' 
+						+ JSON.stringify(data.socket).slice(1,data.socket.length+1) + '</div>'
+						+ '<div style="display:none;color:orange;" class="can-hide-'+messageCount+'">' 
+						+ JSON.stringify(data.sentFrom).slice(1,data.sentFrom.length+1) + '</div>'
+						+ '<div style="display:none;color:green;" class="can-hide-'+messageCount+'">' 
+						+ JSON.stringify(data.sendTo).slice(1,data.sendTo.length+1) + '</div>'
+						+ '<div style="display:none;" class="can-hide-'+messageCount+'">' 
+						+ JSON.stringify(data.cipher).slice(1,data.cipher.length+1) + '</div></div>';
+*/
+		if (data.sendTo === publicKey) {
+			var DecryptionResult = cryptico.decrypt(data.cipher, rsaKey);
+			if (DecryptionResult.status === 'failure'){
+				return ;
+			} else {
+
+				var decrypted = document.createTextNode(': ' + DecryptionResult.plaintext.toString());
+				var deNode = document.createElement('span');
+				deNode.id = 'decrypted-'+messageCount;
+				deNode.style.color = 'blue';
+				deNode.appendChild(decrypted);
+				document.getElementById('from-'+messageCount).appendChild(deNode);
+			}
+		}
+		bText.scrollTop = bText.scrollHeight;
+	});
+
+	socket.on('yourUser', function(data){
+		myUserId.textContent = data.toString();
+	});
+
+	var getToKey = function(e){
+		var elem = document.getElementById("key-"+e);
+		toKey.value = elem.textContent;
+		message.focus();
+		message.select();
+		};
+
+	socket.on('newUser', function(data){
+		if (data.key){
+		userList.innerHTML += '<div style="cursor:pointer;" onclick="getToKey('+ "'" +data.id.toString()+ "'" +')" id="user-'+data.id.toString()+'">'+data.id.toString()
+							+'<br /><div id="key-'+data.id.toString()+'" style="display:none;">'+data.key.toString()+'</div></div>';
+		}
+	});
+	
+	socket.on('userQuit', function(data){
+		var elem = document.getElementById("user-"+data);
+		if (elem) {
+		elem.parentNode.removeChild(elem);
+		}
+	});
+
+	
+    </script>
+  </body>
+</html>
